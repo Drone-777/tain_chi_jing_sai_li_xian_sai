@@ -15,20 +15,26 @@ items = pd.read_csv(ITEMS_PATH, low_memory=False)
 
 df['time'] = pd.to_datetime(df['time'], errors='coerce')  # 把时间字段转成时间格式
 
-# ========== 抽样用户（可选，为了加快运行速度） ==========
-unique_users = df['user_id'].nunique()  # 统计总用户数
+# # ========== 抽样用户（可选，为了加快运行速度） ==========
+# unique_users = df['user_id'].nunique()  # 统计总用户数
 
-sample_size = min(1000, unique_users)   # 最多抽1000个用户
-#sample_size = unique_users
+# sample_size = min(1000, unique_users)   # 最多抽1000个用户
+# #sample_size = unique_users
 
-if sample_size and sample_size < unique_users:
-    sample_users = df['user_id'].drop_duplicates().sample(sample_size, random_state=42).values
-    df_sample = df[df['user_id'].isin(sample_users)].copy()
-else:
-    df_sample = df.copy()
+# if sample_size and sample_size < unique_users:
+#     sample_users = df['user_id'].drop_duplicates().sample(sample_size, random_state=42).values
+#     df_sample = df[df['user_id'].isin(sample_users)].copy()
+# else:
+#     df_sample = df.copy()
+
+# ========== 不抽样，使用全部用户 ==========
+df_sample = df.copy()
+label_date = df_sample['time'].dt.date.max()
+print(f"使用全部 {df_sample['user_id'].nunique()} 个用户，共 {len(df_sample)} 条行为数据，标签日期为 {label_date}")
 
 label_date = df_sample['time'].dt.date.max()  # 训练数据的最后一天（这里对应12月18日）
 print(f"本次使用 {df_sample['user_id'].nunique()} 个用户，共 {len(df_sample)} 条行为数据，标签日期为 {label_date}")
+
 
 # ========== 商品类别映射 ==========
 if 'item_category' in items.columns:
@@ -117,25 +123,34 @@ data['label'] = data['label'].fillna(0).astype(int)
 
 print("最终数据集维度:", data.shape, "正样本数:", int(data['label'].sum()))
 
-# ========== 训练模型 ==========
+# ========== 训练模型并生成 score ==========
 feature_cols = ['view_cnt','fav_cnt','cart_cnt','buy_cnt','time_weighted_score','category_purchase_adjust']
 X = data[feature_cols].fillna(0)
 y = data['label']
 
+print("开始训练或打分...")
 try:
-    if y.sum() > 0:  # 至少有正样本才训练模型
+    if y.sum() > 0:
         from lightgbm import LGBMClassifier
         clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)
         clf.fit(X, y, eval_metric='auc')
-        data['score'] = clf.predict_proba(X[feature_cols])[:,1]
-        print("LightGBM 模型训练完成。")
+        data['score'] = clf.predict_proba(X[feature_cols])[:, 1]
+        score_source = "情况 1：使用 LightGBM 模型预测的购买概率"
+        print("✅", score_source)
     else:
-        raise ValueError("没有正样本，无法训练模型")
+        raise ValueError("No positives to train on")
 except Exception as e:
-    print("模型训练失败，使用启发式规则代替。错误信息:", e)
+    score_source = "情况 2：使用规则加权打分法（未训练模型）"
+    print("⚙️", score_source, "| 错误信息：", e)
     data['score'] = data['time_weighted_score'] + 0.5 * data['category_purchase_adjust']
 
 # ========== 保存预测结果 ==========
-out = data.sort_values(['user_id','score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
+out = data.sort_values(['user_id', 'score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
+
+# 将 score 保留 4 位小数
+out['score'] = out['score'].astype(float).round(4)
+
 out.to_csv(OUTPUT_PATH, index=False)
-print("预测结果已保存至", OUTPUT_PATH)
+print(f"已保存预测结果到 {OUTPUT_PATH}")
+print(f"本次运行中，score 来源：{score_source}")
+
