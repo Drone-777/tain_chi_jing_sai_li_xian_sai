@@ -3,7 +3,7 @@ import numpy as np
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 
-# ========== 文件路径（运行前需要修改为你的实际文件路径） ==========
+# ========== 文件路径 ==========
 #
 #
 #
@@ -30,7 +30,7 @@ items = pd.read_csv(ITEMS_PATH, low_memory=False)
 
 df['time'] = pd.to_datetime(df['time'], errors='coerce')  # 把时间字段转成时间格式
 
-# # ========== 抽样用户（可选，为了加快运行速度） ==========
+# # ========== 抽样用户 ==========
 # unique_users = df['user_id'].nunique()  # 统计总用户数
 
 # sample_size = min(1000, unique_users)   # 最多抽1000个用户
