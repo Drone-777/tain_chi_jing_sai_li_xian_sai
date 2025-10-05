@@ -19,9 +19,9 @@ from sklearn.model_selection import train_test_split
 #
 #
 #
-USER_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_user.csv"   # 用户行为数据
-ITEMS_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_item.csv"  # 商品子集数据
-OUTPUT_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\my_result.csv"                     # 输出预测结果
+USER_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_user.csv"   # 用户行为数据
+ITEMS_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_item.csv"  # 商品子集数据
+OUTPUT_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\my_result.csv"                     # 输出预测结果
 
 # ========== 读取数据 ==========
 print("正在加载数据...")
@@ -46,10 +46,6 @@ df['time'] = pd.to_datetime(df['time'], errors='coerce')  # 把时间字段转�
 df_sample = df.copy()
 label_date = df_sample['time'].dt.date.max()
 print(f"使用全部 {df_sample['user_id'].nunique()} 个用户，共 {len(df_sample)} 条行为数据，标签日期为 {label_date}")
-
-label_date = df_sample['time'].dt.date.max()  # 训练数据的最后一天（这里对应12月18日）
-print(f"本次使用 {df_sample['user_id'].nunique()} 个用户，共 {len(df_sample)} 条行为数据，标签日期为 {label_date}")
-
 
 # ========== 商品类别映射 ==========
 if 'item_category' in items.columns:
@@ -136,9 +132,10 @@ cat_adj = buys.merge(after_interest, on=['user_id','item_category'], how='left')
 def decide_adj(row):
     if row['buy_count']==1 and row['after_interest_cnt']==0:
         return -1
-    if row['buy_count']>=2 and row['after_interest_cnt']>0:     #可以将2调高
+    if row['buy_count']>=2 and row['after_interest_cnt']>0:
         return 2
     return 0
+
 cat_adj['category_purchase_adjust'] = cat_adj.apply(decide_adj, axis=1)
 cat_adj = cat_adj[['user_id','item_category','category_purchase_adjust']]
 
@@ -181,16 +178,37 @@ intent['intent_adjust'] = intent['intent_score'].apply(intent_adjust)
 feat = feat.merge(intent['intent_adjust'], left_on='user_id', right_index=True, how='left')
 feat['intent_adjust'] = feat['intent_adjust'].fillna(0.0)
 
-# ========== 构造标签（12月19日购买数据） ==========
+# ========== 规则4：全局类别偏好（地域性商品权重） ==========
+print("计算全局类别偏好...")
+global_pref = (
+    df_sample[df_sample['behavior_type'] == 4]
+    .groupby('item_category')['item_id']
+    .count()
+    .rename('global_buy_count')
+    .sort_values(ascending=False)
+)
+global_pref = (global_pref / global_pref.max()).rename('global_pref_score')  # 归一化
+feat = feat.merge(global_pref, on='item_category', how='left')
+feat['global_pref_score'] = feat['global_pref_score'].fillna(0.0)
+
+# ========== 构造标签 ==========
 labels = df_sample[(df_sample['time'].dt.date == label_date) & (df_sample['behavior_type']==4)][['user_id','item_id']].drop_duplicates()
 labels['label'] = 1
 data = feat.merge(labels, on=['user_id','item_id'], how='left')
 data['label'] = data['label'].fillna(0).astype(int)
-
 print("最终数据集维度:", data.shape, "正样本数:", int(data['label'].sum()))
 
 # ========== 模型训练与评分 ==========
-feature_cols = ['view_cnt','fav_cnt','cart_cnt','buy_cnt','time_weighted_score','category_purchase_adjust','intent_adjust']
+feature_cols = [
+    'view_cnt',
+    'fav_cnt',
+    'cart_cnt',
+    'buy_cnt',
+    'time_weighted_score',
+    'category_purchase_adjust',
+    'intent_adjust',
+    'global_pref_score'
+]
 X = data[feature_cols].fillna(0)
 y = data['label']
 
@@ -200,15 +218,18 @@ try:
         from lightgbm import LGBMClassifier
         clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)
         clf.fit(X, y, eval_metric='auc')
-        data['score'] = clf.predict_proba(X[feature_cols])[:, 1]
-        score_source = "情况 1：使用 LightGBM 模型预测的购买概率"
-        print("✅", score_source)
+        data['score'] = clf.predict_proba(X)[:, 1]
+        score_source = "✅ 情况 1：使用 LightGBM 模型预测的购买概率"
     else:
         raise ValueError("No positives to train on")
 except Exception as e:
-    score_source = "情况 2：使用规则加权打分法（未训练模型）"
-    print("⚙️", score_source, "| 错误信息：", e)
-    data['score'] = data['time_weighted_score'] + 0.5 * data['category_purchase_adjust'] + 0.2 * data['intent_adjust']
+    score_source = f"⚙️ 情况 2：使用规则加权打分法（未训练模型） | 错误：{e}"
+    data['score'] = (
+        data['time_weighted_score']
+        + 0.5 * data['category_purchase_adjust']
+        + 0.2 * data['intent_adjust']
+        + 0.3 * data['global_pref_score']
+    )
 
 # ========== 输出结果 ==========
 out = data.sort_values(['user_id','score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
