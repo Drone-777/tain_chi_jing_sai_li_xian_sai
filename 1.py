@@ -4,6 +4,21 @@ from datetime import datetime
 from sklearn.model_selection import train_test_split
 
 # ========== 文件路径（运行前需要修改为你的实际文件路径） ==========
+#
+#
+#
+#
+#上传之前删掉路径前缀！
+#上传之前删掉路径前缀！
+#上传之前删掉路径前缀！
+#上传之前删掉路径前缀！
+#上传之前删掉路径前缀！
+#上传之前删掉路径前缀！
+#
+#
+#
+#
+#
 USER_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_user.csv"   # 用户行为数据
 ITEMS_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_item.csv"  # 商品子集数据
 OUTPUT_PATH = "D:\大学\课程\数据科学概论\天池竞赛\\my_result.csv"                     # 输出预测结果
@@ -44,8 +59,8 @@ else:
     df_sample['item_category'] = np.nan
 
 # ========== 规则1：基于时间的加权分数 ==========
-decay_days = 3.0    # 衰减参数，数值越小，越强调最近行为
-fav_weight = 1.5    # 收藏行为比浏览权重更高
+decay_days = 3.0    # 衰减参数，数值越小，越强调最近行为（数值为1-7）
+fav_weight = 1.5    # 收藏行为比浏览权重更高（数值为1.0-2.0）
 
 # 只取浏览和收藏行为
 ev = df_sample[df_sample['behavior_type'].isin([1,2])].copy()
@@ -100,12 +115,12 @@ cat_adj = buys.merge(after_interest, on=['user_id','item_category'], how='left')
 
 # 规则逻辑：
 # - 如果只买过一次，且买完后再也没关注 → 购买意向下降（-1）
-# - 如果买过多次，且买完后还持续关注 → 购买意向上升（+2）
+# - 如果买过多次，且买完后还持续关注 → 购买意向上升（+2）（奖惩机制可调）
 # - 其他情况不变（0）
 def decide_adj(row):
     if row['buy_count']==1 and row['after_interest_cnt']==0:
         return -1
-    if row['buy_count']>=2 and row['after_interest_cnt']>0:
+    if row['buy_count']>=2 and row['after_interest_cnt']>0:     #可以将2调高
         return 2
     return 0
 cat_adj['category_purchase_adjust'] = cat_adj.apply(decide_adj, axis=1)
@@ -132,7 +147,7 @@ print("开始训练或打分...")
 try:
     if y.sum() > 0:
         from lightgbm import LGBMClassifier
-        clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)
+        clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)     #n_estimators：树的数量（越大越精确但越慢）learning_rate：学习速率（越小越稳定但需更多迭代）random_state：随机种子（可复现实验）
         clf.fit(X, y, eval_metric='auc')
         data['score'] = clf.predict_proba(X[feature_cols])[:, 1]
         score_source = "情况 1：使用 LightGBM 模型预测的购买概率"
@@ -153,4 +168,3 @@ out['score'] = out['score'].astype(float).round(4)
 out.to_csv(OUTPUT_PATH, index=False)
 print(f"已保存预测结果到 {OUTPUT_PATH}")
 print(f"本次运行中，score 来源：{score_source}")
-
