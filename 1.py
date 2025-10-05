@@ -130,7 +130,42 @@ cat_adj = cat_adj[['user_id','item_category','category_purchase_adjust']]
 feat = feat.merge(cat_adj, on=['user_id','item_category'], how='left')
 feat['category_purchase_adjust'] = feat['category_purchase_adjust'].fillna(0).astype(int)
 
-# ========== 构造标签（12月19日的购买数据） ==========
+# ========== 规则3：基于用户收藏/加购转化率的购买意向修正 ==========
+print("计算用户购买意向修正...")
+
+# 计算每个用户收藏的商品数、收藏后购买的商品数
+user_fav = df_sample[df_sample['behavior_type'] == 2].groupby('user_id')['item_id'].nunique().rename('fav_total')
+user_fav_buy = df_sample[df_sample['behavior_type'] == 4].groupby('user_id')['item_id'].nunique().rename('buy_total')
+user_fav_merge = pd.concat([user_fav, user_fav_buy], axis=1).fillna(0)
+user_fav_merge['fav_buy_ratio'] = np.where(user_fav_merge['fav_total'] > 0,
+                                           user_fav_merge['buy_total'] / user_fav_merge['fav_total'], 0)
+
+# 计算每个用户加购物车的商品数、加购物车后购买的商品数
+user_cart = df_sample[df_sample['behavior_type'] == 3].groupby('user_id')['item_id'].nunique().rename('cart_total')
+user_cart_buy = df_sample[df_sample['behavior_type'] == 4].groupby('user_id')['item_id'].nunique().rename('buy_total2')
+user_cart_merge = pd.concat([user_cart, user_cart_buy], axis=1).fillna(0)
+user_cart_merge['cart_buy_ratio'] = np.where(user_cart_merge['cart_total'] > 0,
+                                             user_cart_merge['buy_total2'] / user_cart_merge['cart_total'], 0)
+
+# 合并收藏和加购物车的转化率
+intent = pd.concat([user_fav_merge['fav_buy_ratio'], user_cart_merge['cart_buy_ratio']], axis=1).fillna(0)
+intent['intent_score'] = 0.4 * intent['fav_buy_ratio'] + 0.6 * intent['cart_buy_ratio']                     #fav_buy_ratio是收藏，cart_buy_ratio是加购物车，前面的系数是权重，用于平衡两种行为如果感觉加购物车后购买的比率权重高，可调高0.6的值，注意最好保持两者权重和为1
+
+# 定义修正规则（线性映射或分段）
+def intent_adjust(x):
+    if x > 0.7:
+        return 0.2     # 强购买意向（0.2为意向强度调整幅度，建议值在0.1-0.3）
+    elif x < 0.3:
+        return -0.2    # 弱购买意向（0.2为意向强度调整幅度，建议值在0.1-0.3）
+    else:
+        return 0.0     # 中性
+intent['intent_adjust'] = intent['intent_score'].apply(intent_adjust)
+
+# 合并到特征表
+feat = feat.merge(intent['intent_adjust'], left_on='user_id', right_index=True, how='left')
+feat['intent_adjust'] = feat['intent_adjust'].fillna(0.0)
+
+# ========== 构造标签（12月19日购买数据） ==========
 labels = df_sample[(df_sample['time'].dt.date == label_date) & (df_sample['behavior_type']==4)][['user_id','item_id']].drop_duplicates()
 labels['label'] = 1
 data = feat.merge(labels, on=['user_id','item_id'], how='left')
@@ -138,8 +173,8 @@ data['label'] = data['label'].fillna(0).astype(int)
 
 print("最终数据集维度:", data.shape, "正样本数:", int(data['label'].sum()))
 
-# ========== 训练模型并生成 score ==========
-feature_cols = ['view_cnt','fav_cnt','cart_cnt','buy_cnt','time_weighted_score','category_purchase_adjust']
+# ========== 模型训练与评分 ==========
+feature_cols = ['view_cnt','fav_cnt','cart_cnt','buy_cnt','time_weighted_score','category_purchase_adjust','intent_adjust']
 X = data[feature_cols].fillna(0)
 y = data['label']
 
@@ -147,7 +182,7 @@ print("开始训练或打分...")
 try:
     if y.sum() > 0:
         from lightgbm import LGBMClassifier
-        clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)     #n_estimators：树的数量（越大越精确但越慢）learning_rate：学习速率（越小越稳定但需更多迭代）random_state：随机种子（可复现实验）
+        clf = LGBMClassifier(n_estimators=200, learning_rate=0.05, random_state=42)
         clf.fit(X, y, eval_metric='auc')
         data['score'] = clf.predict_proba(X[feature_cols])[:, 1]
         score_source = "情况 1：使用 LightGBM 模型预测的购买概率"
@@ -157,14 +192,11 @@ try:
 except Exception as e:
     score_source = "情况 2：使用规则加权打分法（未训练模型）"
     print("⚙️", score_source, "| 错误信息：", e)
-    data['score'] = data['time_weighted_score'] + 0.5 * data['category_purchase_adjust']
+    data['score'] = data['time_weighted_score'] + 0.5 * data['category_purchase_adjust'] + 0.2 * data['intent_adjust']
 
-# ========== 保存预测结果 ==========
-out = data.sort_values(['user_id', 'score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
-
-# 将 score 保留 4 位小数
+# ========== 输出结果 ==========
+out = data.sort_values(['user_id','score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
 out['score'] = out['score'].astype(float).round(4)
-
 out.to_csv(OUTPUT_PATH, index=False)
 print(f"已保存预测结果到 {OUTPUT_PATH}")
 print(f"本次运行中，score 来源：{score_source}")
