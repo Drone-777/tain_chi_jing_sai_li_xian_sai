@@ -59,21 +59,37 @@ else:
     df_sample['item_category'] = np.nan
 
 # ========== 规则1：基于时间的加权分数 ==========
-decay_days = 3.0    # 衰减参数，数值越小，越强调最近行为（数值为1-7）
-fav_weight = 1.5    # 收藏行为比浏览权重更高（数值为1.0-2.0）
+decay_days = 3.0    # 衰减参数，数值越小越强调最近行为（建议范围：1~7）
+fav_weight = 1.5    # 收藏行为权重（建议范围：1.0~2.0）
+cart_weight = 2.0   # 加购物车行为权重（建议范围：1.5~3.0）
 
-# 只取浏览和收藏行为
-ev = df_sample[df_sample['behavior_type'].isin([1,2])].copy()
-# 距离最后一天（12.18）的天数
+# 取浏览、收藏、加购物车三类行为
+ev = df_sample[df_sample['behavior_type'].isin([1,2,3])].copy()
+
+# 距离最后一天的天数
 ev['days_diff'] = ((pd.to_datetime(label_date) - ev['time']).dt.total_seconds() / (3600*24)).clip(lower=0)
-# 距离越近，权重越大（指数衰减）
+
+# 时间权重：越近的行为权重越高（指数衰减）
 ev['time_weight'] = np.exp(-ev['days_diff'] / decay_days)
-# 收藏行为额外加权
-ev['type_weight'] = np.where(ev['behavior_type']==2, fav_weight, 1.0)
-# 综合权重
+
+# 行为类型权重
+def type_weight_func(bt):
+    if bt == 1:  # 浏览
+        return 1.0
+    elif bt == 2:  # 收藏
+        return fav_weight
+    elif bt == 3:  # 加购物车
+        return cart_weight
+    else:
+        return 0.0
+
+ev['type_weight'] = ev['behavior_type'].apply(type_weight_func)
+
+# 综合加权
 ev['weighted'] = ev['time_weight'] * ev['type_weight']
+
 # 每个用户-商品的加权得分
-uw = ev.groupby(['user_id','item_id'], as_index=False)['weighted'].sum().rename(columns={'weighted':'time_weighted_score'})
+uw = ev.groupby(['user_id', 'item_id'], as_index=False)['weighted'].sum().rename(columns={'weighted': 'time_weighted_score'})
 
 # ========== 用户-商品基础特征 ==========
 df_sample['is_view'] = (df_sample['behavior_type']==1).astype(int)
