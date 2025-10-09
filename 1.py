@@ -19,9 +19,9 @@ from sklearn.model_selection import train_test_split
 #
 #
 #
-USER_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_user.csv"   # 用户行为数据
-ITEMS_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\fresh_comp_offline\\tianchi_fresh_comp_train_item.csv"  # 商品子集数据
-OUTPUT_PATH = "D:\\大学\\课程\\数据科学概论\\天池竞赛\\my_result.csv"                     # 输出预测结果
+USER_PATH = "tianchi_fresh_comp_train_user.csv"   # 用户行为数据
+ITEMS_PATH = "tianchi_fresh_comp_train_item.csv"  # 商品子集数据
+OUTPUT_PATH = "my_result.csv"                     # 输出预测结果
 
 # ========== 读取数据 ==========
 print("正在加载数据...")
@@ -225,15 +225,25 @@ try:
 except Exception as e:
     score_source = f"⚙️ 情况 2：使用规则加权打分法（未训练模型） | 错误：{e}"
     data['score'] = (
-        data['time_weighted_score']
-        + 0.5 * data['category_purchase_adjust']
-        + 0.2 * data['intent_adjust']
-        + 0.3 * data['global_pref_score']
+        1.5*data['time_weighted_score']
+        + 0.8 * data['category_purchase_adjust']
+        + 0.4 * data['intent_adjust']
+        + 0.6 * data['global_pref_score']
     )
 
-# ========== 输出结果 ==========
-out = data.sort_values(['user_id','score'], ascending=[True, False]).groupby('user_id').head(5)[['user_id','item_id','score']]
-out['score'] = out['score'].astype(float).round(4)
+# ========== 保存预测结果（基于F1优化阈值） ==========
+THRESHOLD = 0.35  # 基于F1优化的score阈值
+
+filtered = data[data['score'] >= THRESHOLD]
+
+# 每个用户保留分数最高的5个商品
+out = (
+    filtered.sort_values(['user_id', 'score'], ascending=[True, False])
+    .groupby('user_id')
+    .head(5)[['user_id', 'item_id']]   # ✅ 删除score列
+)
+
+# 保存到CSV
 out.to_csv(OUTPUT_PATH, index=False)
-print(f"已保存预测结果到 {OUTPUT_PATH}")
-print(f"本次运行中，score 来源：{score_source}")
+print(f"✅ 已保存预测结果（仅保留score≥{THRESHOLD}的记录），共 {len(out)} 条。")
+#print(f"本次运行中，score 来源：{score_source}")
