@@ -1,4 +1,3 @@
-# recommend_full_hybrid_optimized_clean.py
 # 最终版本：全量数据集训练 + Hybrid融合 + 正则化稳定模型
 
 import os
@@ -39,7 +38,7 @@ LGB_PARAMS = dict(
     verbose=-1
 )
 
-# 代码 B 中的硬编码权重 (基于全局统计)
+# 代码 B 中的硬编码权重 (基于生活推测和统计)
 WEIGHTS_B = {
     'look': 20989 / 1863827,
     'like': 20989 / 32506,
