@@ -17,7 +17,7 @@ ITEMS_PATH = r"D:\\大学\\课程\\数据科学概论\\天池竞赛\\fresh_comp_
 OUTPUT_SUBMIT = r"D:\\大学\\课程\\数据科学概论\\天池竞赛\\tianchi_mobile_recommendation_predict.csv" # 题目要求的标准文件名
 
 # 核心修改：使用前3天预测第4天
-WINDOW_DAYS = 3           
+WINDOW_DAYS = 2           
 BASE_NEG_POS_RATIO = 2    # 负正样本比例
 RANDOM_STATE = 42
 
